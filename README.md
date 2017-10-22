@@ -1,5 +1,7 @@
 # version-number-generator
 
+[![Build Status](https://travis-ci.org/hegge/version-number-generator.svg?branch=master)](https://travis-ci.org/hegge/version-number-generator)
+
 A Clojure app that generates version numbers, which can easily be deployed to Heroku.
 
 Runs on https://version-number-generator.herokuapp.com/
