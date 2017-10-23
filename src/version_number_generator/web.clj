@@ -1,4 +1,5 @@
 (ns version-number-generator.web
+  {:lang :core.typed}
   (:require [compojure.core :refer [defroutes GET PUT POST DELETE ANY]]
             [compojure.handler :refer [site]]
             [compojure.route :as route]
@@ -12,18 +13,28 @@
             [clojure.data.json :as json]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
-            [compojure.coercions :as coerce]))
+            [compojure.coercions :as coerce]
+            [clojure.core.typed :as t]))
 
+(t/defalias Version (t/HMap :mandatory
+                            {:major Integer,
+                             :minor Integer,
+                             :build Integer,
+                             :patch Integer}))
+
+(t/ann format-appversion [Version -> String])
 (defn format-appversion
   "Canonical version number"
   [v]
   (format "%d.%d.%d.%d" (:major v) (:minor v) (:build v) (:patch v)))
 
+(t/ann format-appversioncode [Version -> String])
 (defn format-appversioncode
   "Android uses the canonical version number and an appversioncode"
   [v]
   (format "%d%02d%04d%02d" (:major v) (:minor v) (:build v) (:patch v)))
 
+(t/ann format-cfbundleshortversionstring [Version -> String])
 (defn format-cfbundleshortversionstring
   "The iO App Store requires two different version strings
     CFBundleShortVersionString can be up to 3 non-negative integers separated by periods
@@ -33,10 +44,19 @@
   [v]
   (format "%d.%d.%d" (:major v) (:minor v) (:build v)))
 
+(t/ann format-cfbundleversion [Version -> String])
 (defn format-cfbundleversion
   [v]
   (format "%d" (:patch v)))
 
+(t/defalias Response (t/HMap :mandatory
+                             {:appversion String,
+                              :appversioncode String,
+                              :cfbundleshortversionstring String,
+                              :cfbundleversion String,
+                              :new-allocation boolean}))
+
+(t/ann format-version [Version boolean -> Response])
 (defn format-version [version new-allocation]
   {:appversion (format-appversion version)
    :appversioncode (format-appversioncode version)
@@ -44,6 +64,9 @@
    :cfbundleversion (format-cfbundleversion version)
    :new-allocation new-allocation})
 
+(t/ann clojure.string/starts-with? [String String -> boolean])
+
+(t/ann check-valid-version [Version -> boolean])
 (defn check-valid-version [v]
   (if
       (and
@@ -58,11 +81,13 @@
     true
     (throw (IllegalArgumentException. "Version number outside range"))))
 
+(t/ann record [Version String String -> Any])
 (defn record [version branch commit]
   (log/info "record" version branch commit)
   (db/insert! (env :database-url)
-              :versions {:major (version :major) :minor (version :minor) :build (version :build) :patch (version :patch) :branch branch :commit commit}))
+              :versions {:major (:major version) :minor (:minor version) :build (:build version) :patch (:patch version) :branch branch :commit commit}))
 
+(t/ann find-known-version [String String -> (t/U Version false)])
 (defn find-known-version [branch commit]
   (let [row (first (db/query (env :database-url)
                 [(str "select major, minor, build, patch from versions "
@@ -73,6 +98,8 @@
       {:major (:major row) :minor (:minor row) :build (:build row) :patch (:patch row)}
       false)))
 
+
+(t/ann next-free-build [Integer Integer String -> Version])
 (defn next-free-build [major minor branch]
   (let [row (first (db/query (env :database-url)
                              [(str "select build from versions "
@@ -83,6 +110,7 @@
       {:major major :minor minor :build (+ (:build row) 1) :patch 0}
       {:major major :minor major :build 0 :patch 0})))
 
+(t/ann next-free-patch [Integer Integer String -> Version])
 (defn next-free-patch [major minor branch]
   (let
       [branch-postfix (second (str/split branch #"-"))
@@ -101,6 +129,7 @@
       {:major major :minor minor :build (:build branch-version) :patch (+ (:patch row) 1)}
       {:major major :minor major :build (:build branch-version) :patch 0}))))
 
+(t/ann allocate-build-number [Integer Integer String -> Version])
 (defn allocate-build-number [major minor branch]
   (if (= branch "master")
     (next-free-build major minor branch)
@@ -108,19 +137,21 @@
       (next-free-patch major minor branch)
       (next-free-build major minor branch))))
 
+(t/ann allocate-version [Integer Integer String String -> Response])
 (defn allocate-version [major minor branch commit]
   (log/info "allocate-version" major minor branch commit)
   (if-let [known-version (find-known-version branch commit)]
-    (let [x 1]
+    (do
      (log/info "found version" known-version)
      (format-version known-version false))
     (let [buildversion (allocate-build-number major minor branch)]
       (log/info "new version" buildversion)
-      (let [version {:major major :minor minor :build (buildversion :build)  :patch (buildversion :patch)}]
+      (let [version {:major major :minor minor :build (:build buildversion)  :patch (:patch buildversion)}]
         (check-valid-version version)
         (record version branch commit)
         (format-version version true)))))
 
+(t/ann get-version [Integer Integer String String boolean -> Any])
 (defn get-version [minor major branch commit authenticated]
   (log/info "get-version" minor major branch commit)
   (let [version (allocate-version minor major branch commit)]
@@ -128,6 +159,7 @@
      :headers {"Content-Type" "text/plain"}
      :body (json/write-str version)}))
 
+(t/ann get-list [String String -> Any])
 (defn get-list [branch commit]
   {:status 200
    :headers {"Content-Type" "text/html"}
@@ -183,8 +215,10 @@
     (record {:major 3 :minor 0 :build 1000 :patch  0} "master",        "unknown")
     (record {:major 3 :minor 0 :build  900 :patch 10} "maint-3.0.900", "unknown")))
 
+(t/ann secret String)
 (def secret "") ;; TODO: secreter secret
 
+(t/ann is-authenticated [Any -> boolean])
 (defn is-authenticated [headers]
   (let [auth (str (:authentication headers))]
     (= auth secret)))

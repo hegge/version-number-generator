@@ -1,6 +1,8 @@
 (ns version-number-generator.web-test
+  {:lang :core.typed}
   (:require [clojure.test :refer :all]
-            [version-number-generator.web :refer :all]))
+            [version-number-generator.web :refer :all]
+            [clojure.core.typed :as t]))
 
 (def some-version {:major 3 :minor 0 :build 100 :patch 1})
 

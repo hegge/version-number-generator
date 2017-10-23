@@ -11,11 +11,14 @@
                  [org.postgresql/postgresql "42.1.4"]
                  [hiccup "1.0.5"]
                  [org.clojure/data.json "0.2.6"]
-                 [org.clojure/tools.logging "0.4.0"]]
+                 [org.clojure/tools.logging "0.4.0"]
+                 [org.clojure/core.typed "0.4.3"]]
   :min-lein-version "2.0.0"
   :plugins [[environ/environ.lein "0.3.1"]]
   :hooks [environ.leiningen.hooks]
   :uberjar-name "version-number-generator-standalone.jar"
   :profiles {:production {:env {:production true}}
              :dev {:plugins [[cider/cider-nrepl "0.7.0"]
-                             [lein-ancient "0.6.14"]]}})
+                             [lein-ancient "0.6.14"]
+                             [lein-typed "0.4.2"]]}}
+  :core.typed {:check [version-number-generator.web]})
