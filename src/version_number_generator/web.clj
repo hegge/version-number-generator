@@ -61,17 +61,13 @@
 (defn record [version branch commit]
   (log/info "record" version branch commit)
   (db/insert! (env :database-url)
-              :versions {:major (version :major) :minor (version :minor) :build (version :build) :patch (version :patch) :branch branch :commit commit}))
+              :versions (merge version {:branch branch :commit commit})))
 
 (defn find-known-version [branch commit]
-  (let [row (first (db/query (env :database-url)
+  (first (db/query (env :database-url)
                 [(str "select major, minor, build, patch from versions "
                       "where branch=? and commit=?")
-                 branch commit]))
-        ]
-    (if row
-      {:major (:major row) :minor (:minor row) :build (:build row) :patch (:patch row)}
-      false)))
+                 branch commit])))
 
 (defn next-free-build [major minor branch]
   (let [row (first (db/query (env :database-url)
@@ -132,12 +128,10 @@
   {:status 200
    :headers {"Content-Type" "text/html"}
    :body (concat
-          (for [s (db/query (env :database-url)
+          (for [selected (db/query (env :database-url)
                             [(str "select major, minor, build, patch, branch, commit from versions "
                                   "order by major desc, minor desc, build desc, patch desc, branch")])]
-            (let
-                [version {:major (:major s) :minor (:minor s) :build (:build s) :patch (:patch s)}]
-              (format "%s %s %s<br />" (format-appversion version) (:branch s) (:commit s)))))})
+              (format "%s %s %s<br />" (format-appversion selected) (:branch selected) (:commit selected))))})
 
 (defn usage []
   (let [host "https://version-number-generator.herokuapp.com"
