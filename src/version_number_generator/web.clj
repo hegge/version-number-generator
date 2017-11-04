@@ -12,7 +12,8 @@
             [clojure.data.json :as json]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
-            [compojure.coercions :as coerce]))
+            [compojure.coercions :as coerce]
+            [clojure.spec.alpha :as s]))
 
 (defn format-appversion
   "Canonical version number"
@@ -37,41 +38,56 @@
   [v]
   (format "%d" (:patch v)))
 
-(defn format-version [version new-allocation]
+(s/def ::major (s/and int? #(<= 1 %) #(<= % 19)))
+(s/def ::minor (s/and int? #(<= 0 %) #(<= % 99)))
+(s/def ::build (s/and int? #(<= 0 %) #(<= % 9999)))
+(s/def ::patch (s/and int? #(<= 0 %) #(<= % 99)))
+(s/def ::version (s/keys :req-un [::major ::minor ::build ::patch]))
+
+(def appversion-regex #"^[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,4}\.[0-9]{1,2}$")
+(s/def ::appversion (s/and string? #(re-matches appversion-regex %)))
+(def appversioncode-regex #"^[0-9]{1,2}[0-9]{2}[0-9]{4}[0-9]{2}$")
+(s/def ::appversioncode (s/and string? #(re-matches appversioncode-regex %)))
+(def cfbundleshortversionstring-regex #"^[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,4}}$")
+(s/def ::cfbundleshortversionstring (s/and string? #(re-matches cfbundleshortversionstring-regex)))
+(def cfbundleversion-regex #"^[0-9]{1,2}$")
+(s/def ::appversioncode (s/and string? #(re-matches cfbundleversion-regex %)))
+(def commit-regex #"^[0-9a-f]{8,40}$")
+(s/def ::commit (s/and string? #(re-matches commit-regex %)))
+(s/def ::new-allocation boolean?)
+(s/def ::formatted-version (s/keys :req-un [::appversion ::appversioncode ::cfbundleshortversionstring ::cfbundleversion]
+                                   :opt-un [::new-allocation]))
+
+(defn format-version [version]
+  ;{:pre [(s/valid? ::version version)]}
   {:appversion (format-appversion version)
    :appversioncode (format-appversioncode version)
    :cfbundleshortversionstring (format-cfbundleshortversionstring version)
-   :cfbundleversion (format-cfbundleversion version)
-   :new-allocation new-allocation})
+   :cfbundleversion (format-cfbundleversion version)})
+(s/fdef format-verison
+        :args (s/cat :version ::version)
+        :ret ::formatted-version)
 
 (defn check-valid-version [v]
   (if
-      (and
-       (<= 1 (:major v))
-       (<= (:major v) 19)
-       (<= 0 (:minor v))
-       (<= (:minor v) 99)
-       (<= 0 (:build v))
-       (<= (:build v) 9999)
-       (<= 0 (:patch v))
-       (<= (:patch v) 99))
+      (s/valid? ::version v)
     true
     (throw (IllegalArgumentException. "Version number outside range"))))
 
 (defn record [version branch commit]
+  {:pre [(s/valid? ::version version)]}
   (log/info "record" version branch commit)
   (db/insert! (env :database-url)
-              :versions {:major (version :major) :minor (version :minor) :build (version :build) :patch (version :patch) :branch branch :commit commit}))
+              :versions (merge version {:branch branch :commit commit})))
 
 (defn find-known-version [branch commit]
-  (let [row (first (db/query (env :database-url)
+  (first (db/query (env :database-url)
                 [(str "select major, minor, build, patch from versions "
                       "where branch=? and commit=?")
-                 branch commit]))
-        ]
-    (if row
-      {:major (:major row) :minor (:minor row) :build (:build row) :patch (:patch row)}
-      false)))
+                 branch commit])))
+(s/fdef find-known-version
+  :args (s/cat :branch string? :commit ::commit)
+  :ret ::version)
 
 (defn next-free-build [major minor branch]
   (let [row (first (db/query (env :database-url)
@@ -82,6 +98,9 @@
     (if row
       {:major major :minor minor :build (+ (:build row) 1) :patch 0}
       {:major major :minor major :build 0 :patch 0})))
+(s/fdef next-free-build
+  :args (s/cat :major ::major :minor ::minor :branch ::branch)
+  :ret ::version)
 
 (defn next-free-patch [major minor branch]
   (let
@@ -100,6 +119,9 @@
     (if row
       {:major major :minor minor :build (:build branch-version) :patch (+ (:patch row) 1)}
       {:major major :minor major :build (:build branch-version) :patch 0}))))
+(s/fdef next-free-patch
+  :args (s/cat :major ::major :minor ::minor :branch ::branch)
+  :ret ::version)
 
 (defn allocate-build-number [major minor branch]
   (if (= branch "master")
@@ -108,36 +130,40 @@
       (next-free-patch major minor branch)
       (next-free-build major minor branch))))
 
-(defn allocate-version [major minor branch commit]
+(defn allocate-version [major minor branch commit can-allocate]
   (log/info "allocate-version" major minor branch commit)
   (if-let [known-version (find-known-version branch commit)]
-    (let [x 1]
+    (do
      (log/info "found version" known-version)
-     (format-version known-version false))
-    (let [buildversion (allocate-build-number major minor branch)]
-      (log/info "new version" buildversion)
-      (let [version {:major major :minor minor :build (buildversion :build)  :patch (buildversion :patch)}]
+     (merge (format-version known-version) {:new-allocation false}))
+    (let [buildversion (allocate-build-number major minor branch)
+          version {:major major :minor minor :build (buildversion :build)  :patch (buildversion :patch)}]
+        (log/info "new version" buildversion)
         (check-valid-version version)
-        (record version branch commit)
-        (format-version version true)))))
+        (if can-allocate
+          (do
+           (record version branch commit)
+           (merge (format-version version) {:new-allocation true}))
+          false))))
 
-(defn get-version [minor major branch commit authenticated]
+(defn get-version [minor major branch commit can-allocate]
   (log/info "get-version" minor major branch commit)
-  (let [version (allocate-version minor major branch commit)]
+  (if-let [version (allocate-version minor major branch commit can-allocate)]
     {:status 200
      :headers {"Content-Type" "text/plain"}
-     :body (json/write-str version)}))
+     :body (json/write-str version)}
+    {:status 401
+     :headers {"Content-Type" "text/plain"}
+     :body ("unknown version, but no auth specified")}))
 
 (defn get-list [branch commit]
   {:status 200
    :headers {"Content-Type" "text/html"}
    :body (concat
-          (for [s (db/query (env :database-url)
+          (for [selected (db/query (env :database-url)
                             [(str "select major, minor, build, patch, branch, commit from versions "
                                   "order by major desc, minor desc, build desc, patch desc, branch")])]
-            (let
-                [version {:major (:major s) :minor (:minor s) :build (:build s) :patch (:patch s)}]
-              (format "%s %s %s<br />" (format-appversion version) (:branch s) (:commit s)))))})
+              (format "%s %s %s<br />" (format-appversion selected) (:branch selected) (:commit selected))))})
 
 (defn usage []
   (let [host "https://version-number-generator.herokuapp.com"
