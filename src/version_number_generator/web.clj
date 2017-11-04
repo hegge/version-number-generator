@@ -104,25 +104,31 @@
       (next-free-patch major minor branch)
       (next-free-build major minor branch))))
 
-(defn allocate-version [major minor branch commit]
+(defn allocate-version [major minor branch commit can-allocate]
   (log/info "allocate-version" major minor branch commit)
   (if-let [known-version (find-known-version branch commit)]
-    (let [x 1]
+    (do
      (log/info "found version" known-version)
      (format-version known-version false))
-    (let [buildversion (allocate-build-number major minor branch)]
-      (log/info "new version" buildversion)
-      (let [version {:major major :minor minor :build (buildversion :build)  :patch (buildversion :patch)}]
+    (let [buildversion (allocate-build-number major minor branch)
+          version {:major major :minor minor :build (buildversion :build)  :patch (buildversion :patch)}]
+        (log/info "new version" buildversion)
         (check-valid-version version)
-        (record version branch commit)
-        (format-version version true)))))
+        (if can-allocate
+          (do
+           (record version branch commit)
+           (format-version version true))
+          false))))
 
-(defn get-version [minor major branch commit authenticated]
+(defn get-version [minor major branch commit can-allocate]
   (log/info "get-version" minor major branch commit)
-  (let [version (allocate-version minor major branch commit)]
+  (if-let [version (allocate-version minor major branch commit can-allocate)]
     {:status 200
      :headers {"Content-Type" "text/plain"}
-     :body (json/write-str version)}))
+     :body (json/write-str version)}
+    {:status 401
+     :headers {"Content-Type" "text/plain"}
+     :body ("unknown version, but no auth specified")}))
 
 (defn get-list [branch commit]
   {:status 200
