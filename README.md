@@ -18,7 +18,7 @@ $ cd version-number-generator
 $ source postgres_env.sh
 $ lein repl
 user=> (require 'version-number-generator.web)
-user=>(def server (version-number-generator.web/-main))
+user=> (def server (version-number-generator.web/-main))
 ```
 
 Your app should now be running on [localhost:5000](http://localhost:5000/).
