@@ -3,7 +3,7 @@
   :url "http://version-number-generator.herokuapp.com"
   :license {:name "Eclipse Public License v1.0"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
-  :dependencies [[org.clojure/clojure "1.8.0"]
+  :dependencies [[org.clojure/clojure "1.9.0-alpha16"]
                  [compojure "1.6.0"]
                  [ring/ring-jetty-adapter "1.6.2"]
                  [environ "1.0.2"]
@@ -17,5 +17,6 @@
   :hooks [environ.leiningen.hooks]
   :uberjar-name "version-number-generator-standalone.jar"
   :profiles {:production {:env {:production true}}
-             :dev {:plugins [[cider/cider-nrepl "0.7.0"]
-                             [lein-ancient "0.6.14"]]}})
+             :dev {:plugins [[cider/cider-nrepl "0.15.0"]
+                             [lein-ancient "0.6.14"]]
+                   :dependencies [[org.clojure/test.check "0.9.0"]]}})
